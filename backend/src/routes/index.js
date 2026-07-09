@@ -1,0 +1,38 @@
+const express = require('express')
+const authRoutes = require('./authRoutes')
+const userRoutes = require('./userRoutes')
+const memberRoutes = require('./memberRoutes')
+const donationRoutes = require('./donationRoutes')
+const complaintRoutes = require('./complaintRoutes')
+const beneficiaryRoutes = require('./beneficiaryRoutes')
+const volunteerRoutes = require('./volunteerRoutes')
+const internRoutes = require('./internRoutes')
+const eventRoutes = require('./eventRoutes')
+const campaignRoutes = require('./campaignRoutes')
+const reportRoutes = require('./reportRoutes')
+const superAdminRoutes = require('./superAdminRoutes')
+const humanRightsLinkRoutes = require('./humanRightsLinkRoutes')
+const notificationRoutes = require('./notificationRoutes')
+
+const router = express.Router()
+
+router.get('/health', (req, res) => {
+  res.json({ success: true, message: 'HRPC ERP API is running', timestamp: new Date().toISOString() })
+})
+
+router.use('/auth', authRoutes)
+router.use('/users', userRoutes)
+router.use('/members', memberRoutes)
+router.use('/donations', donationRoutes)
+router.use('/complaints', complaintRoutes)
+router.use('/beneficiaries', beneficiaryRoutes)
+router.use('/volunteers', volunteerRoutes)
+router.use('/interns', internRoutes)
+router.use('/events', eventRoutes)
+router.use('/campaigns', campaignRoutes)
+router.use('/reports', reportRoutes)
+router.use('/super-admin', superAdminRoutes)
+router.use('/human-rights-links', humanRightsLinkRoutes)
+router.use('/notifications', notificationRoutes)
+
+module.exports = router

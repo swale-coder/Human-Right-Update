@@ -1,0 +1,639 @@
+// HRPC ERP - Phase 1 Prisma Schema
+// Covers: Authentication, RBAC, and the geographic hierarchy
+// (State > District > Taluka > City) that admin roles are scoped to.
+// Future phases (Membership, Donations, Complaints, etc.) will extend this file.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  NATIONAL_ADMIN
+  STATE_ADMIN
+  DISTRICT_ADMIN
+  TALUKA_ADMIN
+  CITY_ADMIN
+  VOLUNTEER
+  MEMBER
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  PENDING
+}
+
+enum MembershipStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  RENEWAL_PENDING
+}
+
+enum MembershipType {
+  GENERAL
+  LIFE
+  HONORARY
+  STUDENT
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+model User {
+  id              String        @id @default(uuid())
+  fullName        String
+  email           String        @unique
+  phone           String?
+  passwordHash    String
+  role            Role          @default(MEMBER)
+  status          UserStatus    @default(ACTIVE)
+
+  // Geographic scope (nullable — only relevant for scoped admin roles)
+  stateId         String?
+  districtId      String?
+  talukaId        String?
+  cityId          String?
+
+  state           State?        @relation(fields: [stateId], references: [id])
+  district        District?     @relation(fields: [districtId], references: [id])
+  taluka          Taluka?       @relation(fields: [talukaId], references: [id])
+  city            City?         @relation(fields: [cityId], references: [id])
+
+  refreshTokens   RefreshToken[]
+  passwordResets  PasswordReset[]
+  activityLogs    ActivityLog[]
+  member          Member?
+  donations       Donation[]
+  complaintsFiled    Complaint[] @relation("ComplaintsFiled")
+  complaintsAssigned Complaint[] @relation("ComplaintsAssigned")
+  volunteer          Volunteer?
+  intern             Intern?
+  notifications      Notification[]
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([role])
+  @@index([email])
+}
+
+model RefreshToken {
+  id          String   @id @default(uuid())
+  token       String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  revoked     Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model PasswordReset {
+  id          String   @id @default(uuid())
+  token       String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime
+  used        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+model ActivityLog {
+  id          String   @id @default(uuid())
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action      String
+  details     String?
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------- Geographic Hierarchy ----------
+
+model State {
+  id          String      @id @default(uuid())
+  name        String      @unique
+  code        String?     @unique
+  districts   District[]
+  users       User[]
+  humanRightsLinks HumanRightsLink[]
+  createdAt   DateTime    @default(now())
+}
+
+model District {
+  id          String   @id @default(uuid())
+  name        String
+  stateId     String
+  state       State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  talukas     Taluka[]
+  users       User[]
+  createdAt   DateTime @default(now())
+
+  @@unique([name, stateId])
+  @@index([stateId])
+}
+
+model Taluka {
+  id          String     @id @default(uuid())
+  name        String
+  districtId  String
+  district    District   @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  cities      City[]
+  users       User[]
+  createdAt   DateTime   @default(now())
+
+  @@unique([name, districtId])
+  @@index([districtId])
+}
+
+model City {
+  id          String   @id @default(uuid())
+  name        String
+  talukaId    String
+  taluka      Taluka   @relation(fields: [talukaId], references: [id], onDelete: Cascade)
+  users       User[]
+  createdAt   DateTime @default(now())
+
+  @@unique([name, talukaId])
+  @@index([talukaId])
+}
+
+// ---------- Membership Management (Phase 2) ----------
+
+model Member {
+  id                String            @id @default(uuid())
+
+  userId            String            @unique
+  user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  membershipNumber  String?           @unique
+  membershipType    MembershipType    @default(GENERAL)
+  status            MembershipStatus  @default(PENDING)
+
+  // Personal details
+  dateOfBirth       DateTime?
+  gender            Gender?
+  fatherOrSpouseName String?
+  occupation        String?
+  address           String?
+  state             String?
+  district          String?
+  taluka            String?
+  city              String?
+  pincode           String?
+
+  // Uploaded assets
+  photoUrl          String?
+  idProofUrl        String?
+  qrCodeUrl         String?
+
+  // Approval & validity
+  appliedAt         DateTime          @default(now())
+  approvedAt        DateTime?
+  approvedById      String?
+  rejectionReason   String?
+  joinDate          DateTime?
+  expiryDate        DateTime?
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([status])
+  @@index([membershipNumber])
+}
+
+// ---------- Donation Management (Phase 3) ----------
+
+enum DonationMode {
+  ONLINE
+  OFFLINE
+}
+
+enum DonationStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum RecurringFrequency {
+  NONE
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model Donation {
+  id                String              @id @default(uuid())
+
+  userId            String?
+  user              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  donorName         String
+  donorEmail        String?
+  donorPhone        String?
+  panNumber         String?
+
+  amount            Decimal             @db.Decimal(12, 2)
+  currency          String              @default("INR")
+  mode              DonationMode
+  status            DonationStatus      @default(PENDING)
+  purpose           String?
+
+  isRecurring       Boolean             @default(false)
+  recurringFrequency RecurringFrequency @default(NONE)
+
+  receiptNumber     String?             @unique
+  razorpayOrderId   String?             @unique
+  razorpayPaymentId String?
+
+  recordedById      String?
+
+  campaignId        String?
+  campaign          Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  donatedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([status])
+  @@index([mode])
+  @@index([userId])
+}
+
+// ---------- Complaint & Human Rights Case Management (Phase 4) ----------
+
+enum ComplaintStatus {
+  REGISTERED
+  UNDER_INVESTIGATION
+  RESOLVED
+  REJECTED
+  CLOSED
+}
+
+enum ComplaintPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Complaint {
+  id                String            @id @default(uuid())
+  complaintNumber   String            @unique
+
+  userId            String?
+  user              User?             @relation("ComplaintsFiled", fields: [userId], references: [id], onDelete: SetNull)
+
+  complainantName   String
+  complainantEmail  String?
+  complainantPhone  String?
+
+  category          String
+  description       String
+  status            ComplaintStatus   @default(REGISTERED)
+  priority          ComplaintPriority @default(MEDIUM)
+
+  state             String?
+  district          String?
+  taluka            String?
+  city              String?
+  incidentLocation  String?
+  incidentDate      DateTime?
+
+  assignedOfficerId String?
+  assignedOfficer   User?             @relation("ComplaintsAssigned", fields: [assignedOfficerId], references: [id], onDelete: SetNull)
+  assignedAdvocateName String?
+
+  resolutionSummary String?
+  resolvedAt        DateTime?
+
+  evidences         ComplaintEvidence[]
+  notes             ComplaintNote[]
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([status])
+  @@index([priority])
+  @@index([category])
+}
+
+model ComplaintEvidence {
+  id            String    @id @default(uuid())
+  complaintId   String
+  complaint     Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  fileUrl       String
+  uploadedById  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([complaintId])
+}
+
+model ComplaintNote {
+  id            String    @id @default(uuid())
+  complaintId   String
+  complaint     Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  authorId      String?
+  note          String
+  createdAt     DateTime  @default(now())
+
+  @@index([complaintId])
+}
+
+// ---------- Beneficiary Management (Phase 5) ----------
+
+enum SupportType {
+  LEGAL
+  FINANCIAL
+  MEDICAL
+  EDUCATION
+  OTHER
+}
+
+enum BeneficiaryStatus {
+  REGISTERED
+  ASSISTANCE_PROVIDED
+  CLOSED
+}
+
+model Beneficiary {
+  id              String            @id @default(uuid())
+  beneficiaryCode String            @unique
+  fullName        String
+  email           String?
+  phone           String?
+  complaintId     String?
+  supportType     SupportType
+  description     String?
+  status          BeneficiaryStatus @default(REGISTERED)
+  assistanceAmount Decimal?         @db.Decimal(12, 2)
+  documentUrl     String?
+  state           String?
+  district        String?
+  city            String?
+  recordedById    String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([status])
+  @@index([supportType])
+}
+
+// ---------- Volunteer Management (Phase 6) ----------
+
+enum VolunteerStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  INACTIVE
+}
+
+model Volunteer {
+  id          String          @id @default(uuid())
+  userId      String          @unique
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills      String?
+  status      VolunteerStatus @default(PENDING)
+  joinedAt    DateTime?
+  approvedById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  attendances VolunteerAttendance[]
+  tasks       VolunteerTask[]
+}
+
+model VolunteerAttendance {
+  id          String    @id @default(uuid())
+  volunteerId String
+  volunteer   Volunteer @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  date        DateTime
+  present     Boolean   @default(true)
+  remarks     String?
+  createdAt   DateTime  @default(now())
+
+  @@index([volunteerId])
+}
+
+model VolunteerTask {
+  id          String    @id @default(uuid())
+  volunteerId String
+  volunteer   Volunteer @relation(fields: [volunteerId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  status      String    @default("PENDING")
+  dueDate     DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([volunteerId])
+}
+
+// ---------- Internship Management (Phase 7) ----------
+
+enum InternStatus {
+  PENDING
+  APPROVED
+  ONGOING
+  COMPLETED
+  REJECTED
+}
+
+model Intern {
+  id          String       @id @default(uuid())
+  userId      String       @unique
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  institution String?
+  course      String?
+  mentorId    String?
+  status      InternStatus @default(PENDING)
+  startDate   DateTime?
+  endDate     DateTime?
+  evaluationScore   Int?
+  evaluationRemarks String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  attendances InternAttendance[]
+  reports     InternDailyReport[]
+}
+
+model InternAttendance {
+  id        String   @id @default(uuid())
+  internId  String
+  intern    Intern   @relation(fields: [internId], references: [id], onDelete: Cascade)
+  date      DateTime
+  present   Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([internId])
+}
+
+model InternDailyReport {
+  id        String   @id @default(uuid())
+  internId  String
+  intern    Intern   @relation(fields: [internId], references: [id], onDelete: Cascade)
+  date      DateTime
+  report    String
+  createdAt DateTime @default(now())
+
+  @@index([internId])
+}
+
+// ---------- Event Management (Phase 8) ----------
+
+enum EventStatus {
+  UPCOMING
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+model Event {
+  id          String      @id @default(uuid())
+  title       String
+  description String?
+  location    String?
+  startAt     DateTime
+  endAt       DateTime?
+  capacity    Int?
+  status      EventStatus @default(UPCOMING)
+  bannerUrl   String?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  registrations EventRegistration[]
+}
+
+model EventRegistration {
+  id            String   @id @default(uuid())
+  eventId       String
+  event         Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  userId        String?
+  attendeeName  String
+  attendeeEmail String?
+  attendeePhone String?
+  attended      Boolean  @default(false)
+  feedback      String?
+  rating        Int?
+  qrCodeUrl     String?
+  registeredAt  DateTime @default(now())
+
+  @@index([eventId])
+}
+
+// ---------- Crowdfunding Management (Phase 9) ----------
+
+enum CampaignStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+model Campaign {
+  id          String         @id @default(uuid())
+  title       String
+  slug        String         @unique
+  description String?
+  goalAmount  Decimal        @db.Decimal(12, 2)
+  startDate   DateTime       @default(now())
+  endDate     DateTime?
+  status      CampaignStatus @default(ACTIVE)
+  bannerUrl   String?
+  createdById String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  updates     CampaignUpdate[]
+  donations   Donation[]
+}
+
+model CampaignUpdate {
+  id          String   @id @default(uuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  title       String
+  content     String
+  createdAt   DateTime @default(now())
+
+  @@index([campaignId])
+}
+
+// ---------- Super Admin: System Settings (Phase 13) ----------
+
+model SystemSetting {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+// ---------- Human Rights Links Directory (Step 7) ----------
+
+enum HumanRightsLinkCategory {
+  NATIONAL_COMMISSION
+  STATE_COMMISSION
+  JUDICIARY
+  LEGAL_SERVICES_AUTHORITY
+  SPECIALIZED_COMMISSION
+  GOVERNMENT_PORTAL
+  INTERNATIONAL_BODY
+}
+
+model HumanRightsLink {
+  id          String                   @id @default(uuid())
+  title       String
+  category    HumanRightsLinkCategory
+  url         String
+  description String?
+  stateId     String?
+  state       State?                   @relation(fields: [stateId], references: [id], onDelete: SetNull)
+  isActive    Boolean                  @default(true)
+  sortOrder   Int                      @default(0)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  @@index([category])
+  @@index([stateId])
+}
+
+// ---------- Notifications (Step 4 / approval workflow) ----------
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  APPROVAL_REQUIRED
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      NotificationType @default(INFO)
+  title     String
+  message   String
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, isRead])
+}
